@@ -1,0 +1,6 @@
+---
+# Master playbook — run database first, then web server
+
+- import_playbook: database.yml
+
+- import_playbook: webserver.yml

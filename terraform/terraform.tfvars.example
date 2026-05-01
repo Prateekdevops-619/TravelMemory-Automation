@@ -1,0 +1,27 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it.
+
+aws_region                = "us-east-1"
+availability_zone_public  = "us-east-1a"
+availability_zone_private = "us-east-1b"
+
+vpc_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"
+
+web_instance_type = "t3.small"
+db_instance_type  = "t3.small"
+
+# Ubuntu 22.04 LTS (us-east-1) — verify at https://cloud-images.ubuntu.com/locator/ec2/
+ami_id = "ami-0c7217cdde317cfec"
+
+key_pair_name = "travelmemory-key"
+
+# Replace with: curl -s https://checkip.amazonaws.com && echo "/32"
+your_ip_cidr = "YOUR_PUBLIC_IP/32"
+
+project_name = "travelmemory"
+environment  = "production"
+
+mongo_admin_password = "CHANGE_ME_strong_admin_password"
+mongo_app_password   = "CHANGE_ME_strong_app_password"

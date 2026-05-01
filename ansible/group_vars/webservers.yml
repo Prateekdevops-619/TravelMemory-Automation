@@ -1,0 +1,11 @@
+---
+# Web server specific variables
+
+backend_port: 3001
+frontend_port: 3000
+
+# nginx serves on 80; proxies /api/ to backend at backend_port
+nginx_site_name: travelmemory
+
+# PM2 app name
+pm2_app_name: travelmemory-backend

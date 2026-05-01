@@ -1,0 +1,164 @@
+---
+- name: Configure MongoDB database server
+  hosts: dbservers
+  become: true
+
+  tasks:
+    # ── System prerequisites ─────────────────────────────────────────────────
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      apt:
+        name:
+          - gnupg
+          - curl
+          - ufw
+        state: present
+
+    # ── MongoDB 7.0 installation ─────────────────────────────────────────────
+
+    - name: Add MongoDB GPG key
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-7.0.asc
+        state: present
+
+    - name: Add MongoDB 7.0 repository
+      apt_repository:
+        repo: "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse"
+        state: present
+        filename: mongodb-org-7.0
+
+    - name: Install MongoDB
+      apt:
+        name: mongodb-org
+        state: present
+        update_cache: true
+
+    # ── MongoDB configuration ────────────────────────────────────────────────
+
+    - name: Configure MongoDB bind IP and security
+      template:
+        src: ../templates/mongod.conf.j2
+        dest: /etc/mongod.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart MongoDB
+
+    - name: Enable and start MongoDB
+      systemd:
+        name: mongod
+        state: started
+        enabled: true
+        daemon_reload: true
+
+    - name: Wait for MongoDB to be ready
+      wait_for:
+        port: "{{ mongo_port }}"
+        delay: 5
+        timeout: 60
+
+    # ── Create admin user ────────────────────────────────────────────────────
+
+    - name: Install pymongo (required by Ansible MongoDB modules)
+      pip:
+        name: pymongo
+        state: present
+
+    - name: Create MongoDB admin user
+      community.mongodb.mongodb_user:
+        login_port: "{{ mongo_port }}"
+        database: admin
+        name: admin
+        password: "{{ mongo_admin_password }}"
+        roles:
+          - db: admin
+            role: root
+        state: present
+      no_log: true
+
+    # ── Enable authentication ────────────────────────────────────────────────
+
+    - name: Enable MongoDB authentication in config
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: "^#?  authorization:"
+        line: "  authorization: enabled"
+      notify: Restart MongoDB
+
+    - name: Flush handlers to restart MongoDB with auth enabled
+      meta: flush_handlers
+
+    - name: Wait for MongoDB to be ready after restart
+      wait_for:
+        port: "{{ mongo_port }}"
+        delay: 5
+        timeout: 60
+
+    # ── Create application database and user ─────────────────────────────────
+
+    - name: Create application database user
+      community.mongodb.mongodb_user:
+        login_port: "{{ mongo_port }}"
+        login_user: admin
+        login_password: "{{ mongo_admin_password }}"
+        database: "{{ mongo_database }}"
+        name: "{{ mongo_app_user }}"
+        password: "{{ mongo_app_password }}"
+        roles:
+          - db: "{{ mongo_database }}"
+            role: readWrite
+        state: present
+      no_log: true
+
+    # ── Firewall (UFW) ───────────────────────────────────────────────────────
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow MongoDB from VPC CIDR only
+      ufw:
+        rule: allow
+        port: "{{ mongo_port }}"
+        proto: tcp
+        src: "10.0.0.0/16"
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    # ── Disable root login ───────────────────────────────────────────────────
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin no"
+      notify: Restart SSH
+
+    - name: Disable password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+      notify: Restart SSH
+
+  handlers:
+    - name: Restart MongoDB
+      systemd:
+        name: mongod
+        state: restarted
+
+    - name: Restart SSH
+      systemd:
+        name: ssh
+        state: restarted

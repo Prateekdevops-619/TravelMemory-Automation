@@ -1,0 +1,232 @@
+---
+- name: Configure web server — Node.js backend + React frontend + nginx
+  hosts: webservers
+  become: true
+
+  vars:
+    db_private_ip: "{{ hostvars['db']['ansible_host'] }}"
+
+  tasks:
+    # ── System prerequisites ─────────────────────────────────────────────────
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install system packages
+      apt:
+        name:
+          - curl
+          - git
+          - nginx
+          - ufw
+          - build-essential
+        state: present
+
+    # ── Node.js 18.x ─────────────────────────────────────────────────────────
+
+    - name: Add NodeSource GPG key
+      apt_key:
+        url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+        state: present
+
+    - name: Add NodeSource repository
+      apt_repository:
+        repo: "deb https://deb.nodesource.com/node_{{ node_version }}.x nodistro main"
+        state: present
+        filename: nodesource
+
+    - name: Install Node.js and NPM
+      apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Verify Node.js version
+      command: node --version
+      register: node_ver
+      changed_when: false
+
+    - name: Print Node.js version
+      debug:
+        msg: "Node.js version: {{ node_ver.stdout }}"
+
+    # ── PM2 process manager ───────────────────────────────────────────────────
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: true
+        state: present
+
+    # ── Clone application repository ─────────────────────────────────────────
+
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Clone TravelMemory repository
+      git:
+        repo: "{{ app_repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: true
+      become_user: ubuntu
+
+    # ── Backend setup ────────────────────────────────────────────────────────
+
+    - name: Install backend dependencies
+      npm:
+        path: "{{ app_dir }}/backend"
+        state: present
+      become_user: ubuntu
+
+    - name: Create backend .env file
+      template:
+        src: ../templates/backend.env.j2
+        dest: "{{ app_dir }}/backend/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+
+    # ── Frontend setup ───────────────────────────────────────────────────────
+
+    - name: Install frontend dependencies
+      npm:
+        path: "{{ app_dir }}/frontend"
+        state: present
+      become_user: ubuntu
+
+    - name: Create frontend .env file
+      template:
+        src: ../templates/frontend.env.j2
+        dest: "{{ app_dir }}/frontend/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: "0644"
+
+    - name: Build React frontend
+      command: npm run build
+      args:
+        chdir: "{{ app_dir }}/frontend"
+      become_user: ubuntu
+      environment:
+        CI: "false"
+
+    # ── Start backend with PM2 ────────────────────────────────────────────────
+
+    - name: Stop existing PM2 app (idempotent)
+      command: pm2 delete {{ pm2_app_name }}
+      become_user: ubuntu
+      ignore_errors: true
+
+    - name: Start Node.js backend with PM2
+      command: >
+        pm2 start {{ app_dir }}/backend/index.js
+        --name {{ pm2_app_name }}
+        --env production
+      become_user: ubuntu
+
+    - name: Save PM2 process list
+      command: pm2 save
+      become_user: ubuntu
+
+    - name: Set up PM2 startup script
+      command: pm2 startup systemd -u ubuntu --hp /home/ubuntu
+      register: pm2_startup
+
+    - name: Enable PM2 startup service
+      command: "{{ pm2_startup.stdout_lines | select('match', '^sudo') | first }}"
+      when: pm2_startup.stdout is search("sudo")
+      ignore_errors: true
+
+    # ── nginx configuration ───────────────────────────────────────────────────
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Deploy nginx site configuration
+      template:
+        src: ../templates/nginx.conf.j2
+        dest: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload nginx
+
+    - name: Enable nginx site
+      file:
+        src: "/etc/nginx/sites-available/{{ nginx_site_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ nginx_site_name }}"
+        state: link
+      notify: Reload nginx
+
+    - name: Test nginx configuration
+      command: nginx -t
+      changed_when: false
+
+    - name: Enable and start nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+
+    # ── Firewall (UFW) ───────────────────────────────────────────────────────
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow HTTP
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    # ── SSH hardening ────────────────────────────────────────────────────────
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin no"
+      notify: Restart SSH
+
+    - name: Disable password authentication
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PasswordAuthentication"
+        line: "PasswordAuthentication no"
+      notify: Restart SSH
+
+  handlers:
+    - name: Reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Restart SSH
+      systemd:
+        name: ssh
+        state: restarted

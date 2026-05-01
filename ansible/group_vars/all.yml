@@ -1,0 +1,19 @@
+---
+# Shared variables for all hosts
+
+project_name: travelmemory
+app_repo_url: "https://github.com/UnpredictablePrashant/TravelMemory.git"
+app_dir: "/opt/travelmemory"
+
+node_version: "18"
+nodejs_major: "18"
+
+# MongoDB settings — keep in sync with terraform.tfvars
+mongo_port: 27017
+mongo_database: travelmemory
+mongo_app_user: travelmemory_user
+
+# These should be overridden via Ansible Vault in production:
+#   ansible-vault encrypt_string 'your_password' --name 'mongo_admin_password'
+mongo_admin_password: "CHANGE_ME_strong_admin_password"
+mongo_app_password: "CHANGE_ME_strong_app_password"
