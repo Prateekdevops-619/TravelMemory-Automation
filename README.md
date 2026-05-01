@@ -282,16 +282,4 @@ This removes all AWS resources — both EC2 instances, VPC, subnets, NAT gateway
 
 ---
 
-## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, React Router 6, Axios |
-| Backend | Node.js 18, Express 4, Mongoose 7 |
-| Database | MongoDB 7.0 |
-| Process manager | PM2 |
-| Reverse proxy | nginx |
-| IaC | Terraform >= 1.5, AWS provider ~> 5.0 |
-| Config management | Ansible (playbooks + Jinja2 templates) |
-| Cloud provider | AWS (eu-west-2) |
-| OS | Ubuntu 22.04 LTS |
